@@ -12,8 +12,15 @@ import threading
 import subprocess
 import sys
 from pystray import Icon, Menu, MenuItem
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import io
+from io import BytesIO
+import pyttsx3
+from tkinter import messagebox
+
+global numberOfThermistors
+numberOfThermistors = 8
+
 
 class TemperatureMonitor:
     def __init__(self):
@@ -24,7 +31,7 @@ class TemperatureMonitor:
 
         # Temperature data storage (10 minutes = 600 seconds)
         self.max_points = 600
-        self.temp_data = [deque(maxlen=self.max_points) for _ in range(4)]
+        self.temp_data = [deque(maxlen=self.max_points) for _ in range(numberOfThermistors)]
         self.timestamps = deque(maxlen=self.max_points)
 
         # Serial port
@@ -35,20 +42,42 @@ class TemperatureMonitor:
         # Watchdog flag
         self.running = True
 
+        # Add watchdog timer attributes
+        self.last_data_time = time.time()
+        self.watchdog_active = True
+        self.watchdog_thread = threading.Thread(target=self.watchdog_monitor)
+        self.watchdog_thread.daemon = True
+        self.watchdog_thread.start()
+        
+        # Initialize text-to-speech engine
+        self.tts_engine = pyttsx3.init()
+
         # Setup UI
         self.setup_graph()
         self.setup_tray()
 
-        # Start with port selection
-        self.show_port_selector()
+        # Try to connect to last port first
+        if self.last_port and self.try_connect_to_port(self.last_port):
+            self.start_reading()
+        else:
+            self.show_port_selector()
 
-        # Start watchdog thread
-        self.watchdog_thread = threading.Thread(target=self.watchdog, daemon=True)
-        self.watchdog_thread.start()
+    def try_connect_to_port(self, port):
+        # Check if port exists in available ports
+        available_ports = [p.device for p in serial.tools.list_ports.comports()]
+        if port not in available_ports:
+            return False
+        
+        # Try to connect to the port
+        try:
+            self.serial_port = serial.Serial(port, self.baud_rate, timeout=1)
+            return True
+        except serial.SerialException:
+            return False
 
     def setup_graph(self):
         self.fig, self.ax = plt.subplots()
-        self.lines = [self.ax.plot([], [], label=f'Temp {i}')[0] for i in range(4)]
+        self.lines = [self.ax.plot([], [], label=f'Temp {i}')[0] for i in range(numberOfThermistors)]
         self.ax.set_ylim(0, 120)  # Temp range 0-120C
         self.ax.set_xlim(0, self.max_points)
         self.ax.set_title("Temperature Readings (Last 10 Minutes)")
@@ -115,31 +144,113 @@ class TemperatureMonitor:
         self.read_thread.start()
         self.update_graph()
 
+    def create_temp_icon(self, temperature):
+        """Creates an icon showing the temperature on a colored background"""
+        # Create a new image with RGBA (including alpha channel)
+        img = Image.new('RGBA', (32, 32), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        
+        # Determine background color based on temperature
+        if temperature < 65:
+            bg_color = (0, 255, 0)  # Green
+        elif temperature < 80:
+            bg_color = (255, 255, 0)  # Yellow
+        else:
+            bg_color = (255, 0, 0)  # Red
+        
+        # Draw background rectangle
+        draw.rectangle([0, 0, 31, 31], fill=bg_color)
+        
+        # Load a font that will fit in the icon
+        try:
+            font = ImageFont.truetype("arial.ttf", 16)
+        except:
+            font = ImageFont.load_default()
+        
+        # Convert temperature to string and ensure it's max 3 chars
+        temp_str = str(min(999, max(-99, int(temperature))))
+        
+        # Calculate text size and position to center it
+        text_bbox = draw.textbbox((0, 0), temp_str, font=font)
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+        x = (32 - text_width) // 2
+        y = (32 - text_height) // 2
+        
+        # Draw the text in black
+        draw.text((x, y), temp_str, fill=(0, 0, 0), font=font)
+        
+        # Convert to icon
+        icon_buffer = BytesIO()
+        img.save(icon_buffer, format='PNG')
+        icon = Image.open(icon_buffer)
+        return icon
+
     def read_serial(self):
         while self.running:
             if self.serial_port and self.serial_port.is_open:
                 try:
                     line = self.serial_port.readline().decode('utf-8').strip()
-                    if line.startswith("Temp"):
-                        temp_num = int(line.split()[1][:-1])
-                        temp_value = int(line.split()[-1][:-1])
+                    
+                    # Update watchdog timer on any data reception
+                    self.last_data_time = time.time()
+                    self.watchdog_active = True  # Re-enable watchdog after receiving data
+                    
+                    # Validate basic packet format
+                    if not line.startswith("Temp"):
+                        error_msg = f"Malformed packet (invalid prefix): {line}"
+                        print(error_msg)
+                        with open("temp_log.txt", "a") as log:
+                            log.write(f"{datetime.datetime.now()} - ERROR: {error_msg}\n")
+                        continue
+
+                    # Parse temperature number and value
+                    try:
+                        parts = line.split()
+                        if len(parts) != 3:
+                            raise ValueError("Invalid number of parts")
+                        
+                        temp_num = int(parts[1][:-1])
+                        temp_value = int(parts[2][:-1])
+                        
+                        if temp_num < 0 or temp_num >= numberOfThermistors:
+                            raise ValueError(f"Temperature number {temp_num} out of range")
+                        
+                        if temp_value < -20 or temp_value > 150:
+                            raise ValueError(f"Temperature value {temp_value}C out of range")
+                        
                         self.temp_data[temp_num].append(temp_value)
                         if not self.timestamps or time.time() - self.timestamps[-1] >= 1:
                             self.timestamps.append(time.time())
 
+                        # Update the tray icon with the highest temperature
+                        max_temp = max(max(data) if data else -999 for data in self.temp_data)
+                        icon = self.create_temp_icon(max_temp)
+                        self.tray_icon.icon = icon
+                        
                         # Log the temperature
                         with open("temp_log.txt", "a") as log:
                             log.write(f"{datetime.datetime.now()} - Temp {temp_num}: {temp_value}C\n")
 
-                        # Check for shutdown condition
                         if temp_value > 100:
                             with open("temp_log.txt", "a") as log:
                                 log.write(f"{datetime.datetime.now()} - Shutdown triggered: Temp {temp_num} exceeded 100C\n")
                             subprocess.run(["shutdown", "/s", "/t", "5"])
                             self.quit_app()
+                            
+                    except ValueError as ve:
+                        error_msg = f"Malformed packet (parsing error): {line} - {str(ve)}"
+                        print(error_msg)
+                        with open("temp_log.txt", "a") as log:
+                            log.write(f"{datetime.datetime.now()} - ERROR: {error_msg}\n")
+                    
                 except Exception as e:
-                    print(f"Error reading serial: {e}")
-            time.sleep(0.1)
+                    error_msg = f"Serial read error: {str(e)}"
+                    print(error_msg)
+                    with open("temp_log.txt", "a") as log:
+                        log.write(f"{datetime.datetime.now()} - ERROR: {error_msg}\n")
+            
+                time.sleep(0.1)
 
     def update_graph(self):
         if self.running:
@@ -151,9 +262,30 @@ class TemperatureMonitor:
             self.canvas.draw()
             self.root.after(1000, self.update_graph)
 
-    def watchdog(self):
+    def watchdog_monitor(self):
+        """Monitors for data reception timeouts"""
         while self.running:
-            time.sleep(5)  # Simple watchdog checking every 5 seconds
+            if self.watchdog_active and time.time() - self.last_data_time > 2.5:
+                self.watchdog_active = False  # Prevent multiple alerts
+                
+                # Log the timeout
+                error_msg = "No data received for 2.5 seconds - possible sensor system failure"
+                print(error_msg)
+                with open("temp_log.txt", "a") as log:
+                    log.write(f"{datetime.datetime.now()} - ERROR: {error_msg}\n")
+                
+                # Show message box (in a separate thread to prevent blocking)
+                threading.Thread(target=lambda: messagebox.showwarning(
+                    "Sensor System Error",
+                    "The thermal sensor system is not responding.\nPlease check all connections."
+                )).start()
+                
+                # Text-to-speech alert
+                threading.Thread(target=lambda: self.tts_engine.say(
+                    "The NVidia GPU power connector thermal sensor is not operating correctly. Please check connections before continuing."
+                ) or self.tts_engine.runAndWait()).start()
+                
+            time.sleep(0.1)
 
     def minimize_to_tray(self):
         self.root.withdraw()
@@ -165,6 +297,8 @@ class TemperatureMonitor:
         self.running = False
         if self.serial_port and self.serial_port.is_open:
             self.serial_port.close()
+        if hasattr(self, 'tts_engine'):
+            self.tts_engine.stop()
         self.tray_icon.stop()
         self.root.quit()
         sys.exit(0)
