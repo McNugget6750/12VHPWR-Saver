@@ -1,3 +1,19 @@
+"""
+5090TempWatch - GPU Power Connector Temperature Monitoring System
+
+This application monitors temperatures from multiple thermistors connected to GPU power connectors
+via a microcontroller. It provides real-time temperature monitoring, logging, and safety features
+including automatic shutdown if temperatures exceed safe thresholds.
+
+Features:
+- Real-time temperature monitoring via serial connection
+- System tray icon with color-coded temperature display
+- Automatic logging of temperature data and errors
+- Watchdog monitoring for sensor system failures
+- Text-to-speech alerts for critical issues
+- Emergency shutdown capability for unsafe temperatures
+"""
+
 import tkinter as tk
 from tkinter import ttk
 import serial
@@ -18,12 +34,19 @@ from io import BytesIO
 import pyttsx3
 from tkinter import messagebox
 
-global numberOfThermistors
-numberOfThermistors = 8
-
+# Global configuration
+numberOfThermistors = 8  # Number of temperature sensors in the system
+SERIAL_BAUDRATE = 115200   # Serial communication speed
+LOG_FILE = "temp_log.txt"
 
 class TemperatureMonitor:
+    """
+    Main application class for temperature monitoring system.
+    Handles serial communication, data processing, UI, and safety features.
+    """
+
     def __init__(self):
+        """Initialize the temperature monitoring system and its components."""
         self.root = tk.Tk()
         self.root.title("Temperature Monitor")
         self.root.geometry("600x400")
@@ -36,7 +59,7 @@ class TemperatureMonitor:
 
         # Serial port
         self.serial_port = None
-        self.baud_rate = 115200
+        self.baud_rate = SERIAL_BAUDRATE
         self.last_port = self.load_last_port()
 
         # Watchdog flag
@@ -63,6 +86,15 @@ class TemperatureMonitor:
             self.show_port_selector()
 
     def try_connect_to_port(self, port):
+        """
+        Check if the specified port exists in the list of available ports.
+        
+        Args:
+            port (str): The port to check
+            
+        Returns:
+            bool: True if the port exists and can be connected to, False otherwise
+        """
         # Check if port exists in available ports
         available_ports = [p.device for p in serial.tools.list_ports.comports()]
         if port not in available_ports:
@@ -76,6 +108,7 @@ class TemperatureMonitor:
             return False
 
     def setup_graph(self):
+        """Set up the graph for temperature monitoring."""
         self.fig, self.ax = plt.subplots()
         self.lines = [self.ax.plot([], [], label=f'Temp {i}')[0] for i in range(numberOfThermistors)]
         self.ax.set_ylim(0, 120)  # Temp range 0-120C
@@ -89,6 +122,7 @@ class TemperatureMonitor:
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     def setup_tray(self):
+        """Set up the system tray icon and its menu."""
         # Create a simple icon (red square for this example)
         image = Image.new('RGB', (64, 64), (255, 0, 0))
         self.tray_icon = Icon("TempMonitor", image, menu=Menu(
@@ -98,6 +132,7 @@ class TemperatureMonitor:
         threading.Thread(target=self.tray_icon.run, daemon=True).start()
 
     def load_last_port(self):
+        """Load the last used serial port from a file."""
         try:
             with open("last_port.txt", "r") as f:
                 return f.read().strip()
@@ -105,10 +140,12 @@ class TemperatureMonitor:
             return None
 
     def save_last_port(self, port):
+        """Save the last used serial port to a file."""
         with open("last_port.txt", "w") as f:
             f.write(port)
 
     def show_port_selector(self):
+        """Show a port selection dialog to the user."""
         selector = tk.Toplevel(self.root)
         selector.title("Select Serial Port")
         selector.geometry("300x100")
@@ -140,12 +177,26 @@ class TemperatureMonitor:
         selector.grab_set()
 
     def start_reading(self):
+        """Start reading temperature data from the serial port."""
         self.read_thread = threading.Thread(target=self.read_serial, daemon=True)
         self.read_thread.start()
         self.update_graph()
 
     def create_temp_icon(self, temperature):
-        """Creates an icon showing the temperature on a colored background"""
+        """
+        Create a system tray icon showing the current maximum temperature.
+        
+        Args:
+            temperature (int): Temperature value to display
+            
+        Returns:
+            PIL.Image: Generated icon image with temperature display
+            
+        The background color changes based on temperature thresholds:
+        - Green: < 65°C
+        - Yellow: 65-80°C
+        - Red: > 80°C
+        """
         # Create a new image with RGBA (including alpha channel)
         img = Image.new('RGBA', (32, 32), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
@@ -187,6 +238,10 @@ class TemperatureMonitor:
         return icon
 
     def read_serial(self):
+        """
+        Read and process temperature data from the serial port.
+        Validates data format, updates displays, and handles error conditions.
+        """
         while self.running:
             if self.serial_port and self.serial_port.is_open:
                 try:
@@ -200,7 +255,7 @@ class TemperatureMonitor:
                     if not line.startswith("Temp"):
                         error_msg = f"Malformed packet (invalid prefix): {line}"
                         print(error_msg)
-                        with open("temp_log.txt", "a") as log:
+                        with open(LOG_FILE, "a") as log:
                             log.write(f"{datetime.datetime.now()} - ERROR: {error_msg}\n")
                         continue
 
@@ -229,11 +284,11 @@ class TemperatureMonitor:
                         self.tray_icon.icon = icon
                         
                         # Log the temperature
-                        with open("temp_log.txt", "a") as log:
+                        with open(LOG_FILE, "a") as log:
                             log.write(f"{datetime.datetime.now()} - Temp {temp_num}: {temp_value}C\n")
 
                         if temp_value > 100:
-                            with open("temp_log.txt", "a") as log:
+                            with open(LOG_FILE, "a") as log:
                                 log.write(f"{datetime.datetime.now()} - Shutdown triggered: Temp {temp_num} exceeded 100C\n")
                             subprocess.run(["shutdown", "/s", "/t", "5"])
                             self.quit_app()
@@ -241,18 +296,19 @@ class TemperatureMonitor:
                     except ValueError as ve:
                         error_msg = f"Malformed packet (parsing error): {line} - {str(ve)}"
                         print(error_msg)
-                        with open("temp_log.txt", "a") as log:
+                        with open(LOG_FILE, "a") as log:
                             log.write(f"{datetime.datetime.now()} - ERROR: {error_msg}\n")
                     
                 except Exception as e:
                     error_msg = f"Serial read error: {str(e)}"
                     print(error_msg)
-                    with open("temp_log.txt", "a") as log:
+                    with open(LOG_FILE, "a") as log:
                         log.write(f"{datetime.datetime.now()} - ERROR: {error_msg}\n")
             
                 time.sleep(0.1)
 
     def update_graph(self):
+        """Update the temperature graph on the main window."""
         if self.running:
             for i, line in enumerate(self.lines):
                 if self.temp_data[i]:
@@ -263,7 +319,10 @@ class TemperatureMonitor:
             self.root.after(1000, self.update_graph)
 
     def watchdog_monitor(self):
-        """Monitors for data reception timeouts"""
+        """
+        Monitor for data reception timeouts.
+        Triggers alerts if no data is received for 2.5 seconds.
+        """
         while self.running:
             if self.watchdog_active and time.time() - self.last_data_time > 2.5:
                 self.watchdog_active = False  # Prevent multiple alerts
@@ -271,7 +330,7 @@ class TemperatureMonitor:
                 # Log the timeout
                 error_msg = "No data received for 2.5 seconds - possible sensor system failure"
                 print(error_msg)
-                with open("temp_log.txt", "a") as log:
+                with open(LOG_FILE, "a") as log:
                     log.write(f"{datetime.datetime.now()} - ERROR: {error_msg}\n")
                 
                 # Show message box (in a separate thread to prevent blocking)
@@ -288,12 +347,15 @@ class TemperatureMonitor:
             time.sleep(0.1)
 
     def minimize_to_tray(self):
+        """Minimize the main window to the system tray."""
         self.root.withdraw()
 
     def restore_from_tray(self, icon=None, item=None):
+        """Restore the main window from the system tray."""
         self.root.deiconify()
 
     def quit_app(self, icon=None, item=None):
+        """Clean up resources and exit the application."""
         self.running = False
         if self.serial_port and self.serial_port.is_open:
             self.serial_port.close()
