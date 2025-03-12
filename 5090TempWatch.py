@@ -181,7 +181,7 @@ class TemperatureMonitor:
 
     def setup_tray_icon(self):
         """Configure and launch the system tray icon"""
-        menu_items = (MenuItem('Exit', self.quit_app),)
+        menu_items = (MenuItem('Show/Hide Graph', self.toggle_graph), MenuItem('Exit', self.quit_app))
         self.tray_icon = Icon('temp', Image.new('RGB', (32, 32), 'red'), 
                              "GPU Temp Monitor", menu_items)
         # Run the tray icon in a separate thread
@@ -262,12 +262,12 @@ class TemperatureMonitor:
 
     def toggle_graph(self):
         """Show or hide the graph window"""
-        if not self.graph_visible:
-            self.graph_window.deiconify()
-            self.graph_visible = True
-        else:
-            self.graph_window.withdraw()
+        if self.graph_visible:
+            self.graph_window.withdraw()  # Hide the graph window
             self.graph_visible = False
+        else:
+            self.graph_window.deiconify()  # Show the graph window
+            self.graph_visible = True
 
     def speak_warning(self, message, warning_type):
         """Speak a warning message with rate limiting"""
@@ -303,8 +303,8 @@ class TemperatureMonitor:
             else:  # Linux/Unix
                 os.system('shutdown -h now')
             
-            # Now clean up application resources
-            self.quit_app()
+            # Clean up application resources
+            # self.quit_app()
                 
         except Exception as e:
             print(f"Error during shutdown: {str(e)}")
