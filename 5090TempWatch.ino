@@ -11,20 +11,17 @@
 // the value of the 'other' resistor
 #define SERIESRESISTOR 4700 // 4.7k resistor
 
-#define TEMPERATURE_PIN_0 A0
-#define TEMPERATURE_PIN_1 A1
-#define TEMPERATURE_PIN_2 A2
-#define TEMPERATURE_PIN_3 A3
+const int temperaturePins[8] = {A0, A1, A2, A3, A4, A5, A6, A7};
 
 volatile uint16_t temperature_0 = 0;
 
 void setup() {
   Serial.begin(115200);
-  // put your setup code here, to run once:
-  pinMode(TEMPERATURE_PIN_0, INPUT);
-  pinMode(TEMPERATURE_PIN_1, INPUT);
-  pinMode(TEMPERATURE_PIN_2, INPUT);
-  pinMode(TEMPERATURE_PIN_3, INPUT);
+
+  for (int i = 0; i < 7; i++)
+  {
+    pinMode(temperaturePins[i], INPUT);
+  }
 }
 
 int readTemperature(uint8_t pinnumber)
@@ -49,19 +46,13 @@ int readTemperature(uint8_t pinnumber)
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  Serial.print("Temp 0: ");
-  Serial.print(readTemperature(TEMPERATURE_PIN_0) > 0 ? readTemperature(TEMPERATURE_PIN_0) : 0);
-  Serial.println("C");
-  Serial.print("Temp 1: ");
-  Serial.print(readTemperature(TEMPERATURE_PIN_1) > 0 ? readTemperature(TEMPERATURE_PIN_1) : 0);
-  Serial.println("C");
-  Serial.print("Temp 2: ");
-  Serial.print(readTemperature(TEMPERATURE_PIN_2) > 0 ? readTemperature(TEMPERATURE_PIN_2) : 0);
-  Serial.println("C");
-  Serial.print("Temp 3: ");
-  Serial.print(readTemperature(TEMPERATURE_PIN_3) > 0 ? readTemperature(TEMPERATURE_PIN_3) : 0);
-  Serial.println("C");
+  for (int i = 0; i < 8; i++)
+  {
+    Serial.print("Temp " + String(i) + ": ");
+    Serial.print(readTemperature(temperaturePins[i]) > 0 ? readTemperature(temperaturePins[i]) : 0);
+    Serial.println("C");
+    _delay_ms(20);
+  }
 
   _delay_ms(1000);
 }
