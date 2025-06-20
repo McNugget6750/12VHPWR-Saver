@@ -1,0 +1,23 @@
+%TF.GenerationSoftware,KiCad,Pcbnew,8.0.6*%
+%TF.CreationDate,2025-03-08T18:58:06-08:00*%
+%TF.ProjectId,8CH Thermal Monitor,38434820-5468-4657-926d-616c204d6f6e,rev?*%
+%TF.SameCoordinates,PX7df6180PY8670810*%
+%TF.FileFunction,Profile,NP*%
+%FSLAX46Y46*%
+G04 Gerber Fmt 4.6, Leading zero omitted, Abs format (unit mm)*
+G04 Created by KiCad (PCBNEW 8.0.6) date 2025-03-08 18:58:06*
+%MOMM*%
+%LPD*%
+G01*
+G04 APERTURE LIST*
+%TA.AperFunction,Profile*%
+%ADD10C,0.050000*%
+%TD*%
+G04 APERTURE END LIST*
+D10*
+X2540000Y66040000D02*
+X76200000Y66040000D01*
+X76200000Y2540000D01*
+X2540000Y2540000D01*
+X2540000Y66040000D01*
+M02*
